@@ -27,6 +27,8 @@ def load_data_from_sheets(url):
     df = pd.read_csv(csv_url)
     return df
 
+if st.button("🔄 Refresh data"):
+    st.cache_data.clear()
 
 # region Load and display the data
 whoop_df = load_data_from_sheets(whoop_URl)
