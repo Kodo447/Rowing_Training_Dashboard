@@ -16,6 +16,7 @@ st.set_page_config(
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1ka1T_HJo7W6C20gWn3VfcNmYTTij24lWwfHyxeBenVc/edit?gid=477886919#gid=477886919"
 whoop_URl ="https://docs.google.com/spreadsheets/d/1ka1T_HJo7W6C20gWn3VfcNmYTTij24lWwfHyxeBenVc/edit?gid=355675609#gid=355675609"
 intervals_URL = "https://docs.google.com/spreadsheets/d/1ka1T_HJo7W6C20gWn3VfcNmYTTij24lWwfHyxeBenVc/edit?gid=1473267175#gid=1473267175"
+strava_URL = "https://docs.google.com/spreadsheets/d/1ka1T_HJo7W6C20gWn3VfcNmYTTij24lWwfHyxeBenVc/edit?gid=543202266#gid=543202266"
 @st.cache_data
 def load_data_from_sheets(url):
     """Load data from Google Sheets using the share link"""
@@ -31,12 +32,17 @@ def load_data_from_sheets(url):
 whoop_df = load_data_from_sheets(whoop_URl)
 whoop_df["date"] = pd.to_datetime(whoop_df["date"]).dt.normalize()
 whoop_df["recovery"] = pd.to_numeric(whoop_df["recovery"], errors='coerce')
+whoop_df["hrv"] = pd.to_numeric(whoop_df["hrv"], errors='coerce')
 whoop_df["sleep_hours"] = pd.to_numeric(whoop_df["sleep_hours"], errors='coerce')
 whoop_df["sleep_hours"]= whoop_df["sleep_hours"]/60  # Convert minutes to hours
 df = load_data_from_sheets(SHEET_URL)
 df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors='coerce')
 intervals_df = load_data_from_sheets(intervals_URL)
 intervals_df["date"] = pd.to_datetime(intervals_df["session_id"].str.split("_").str[0], format="%Y%m%d", errors='coerce')
+strava_df = load_data_from_sheets(strava_URL)
+strava_df["date"] = pd.to_datetime(strava_df["activity_start_date"]).dt.tz_localize(None).dt.normalize()
+strava_df["activity.distance"] = pd.to_numeric(strava_df["activity.distance"], errors='coerce')
+strava_df = strava_df[strava_df["activity.distance"] != 0]
 st.title("Rowing Training Dashboard")
 # end region
 
@@ -99,11 +105,17 @@ whoop_df_filtered = whoop_df.loc[mask]
 if week_number:
     whoop_df_filtered = whoop_df_filtered[whoop_df_filtered["date"].dt.isocalendar().week.isin(week_number)]
 
-col1, col2, col3 = st.columns(3)
+#strave filter
+mask_strava = strava_df["date"].between(pd.Timestamp(start_date), pd.Timestamp(end_date))
+strava_df_filtered = strava_df.loc[mask_strava]
+if week_number:
+    strava_df_filtered = strava_df_filtered[strava_df_filtered["date"].dt.isocalendar().week.isin(week_number)]
+
+col1, col2, col3,col4 = st.columns(4)
 
 col1.metric(
     label="Total Distance Rowed",
-    value=f"{df['distance_m'].sum():,.0f} m"
+    value=f"{df['distance_m'].sum()+strava_df_filtered['activity.distance'].sum():,.0f} m"
 )
 
 col2.metric(
@@ -116,7 +128,12 @@ col3.metric(
     value=f"{whoop_df_filtered['recovery'].mean():.0f} %"
 )
 
+col4.metric(
+    label="Average HRV",
+    value=f"{whoop_df_filtered['hrv'].mean():.0f} ms"
+)
 
+st.dataframe(strava_df_filtered)
 
 #region Main Table
 # select box: choose a session to view its intervals
@@ -150,13 +167,20 @@ if selected_session:
 
 col1, col2 = st.columns(2)
 
+#df for bar chart 
+strava_df_filtered_subset = strava_df_filtered[['date', 'activity.distance']].copy()
+strava_df_filtered_subset = strava_df_filtered_subset.rename(columns={'activity.distance': 'distance_m'})
+strava_df_filtered_subset['workout_type'] = 'Strava' 
+bar_chart_df = pd.concat([df[['date', 'distance_m', 'workout_type']], strava_df_filtered_subset], ignore_index=True)
+
 with col2:
-    bar_chart = px.bar(df, x='date', y='distance_m', title='Distance Rowed Over Time',
+    bar_chart = px.bar(bar_chart_df, x='date', y='distance_m', title='Distance Rowed Over Time',
                  color="workout_type")
 
     st.plotly_chart(bar_chart)
 
 # Recovery over time
+
 line_chart = px.line(whoop_df_filtered, x='date', y='recovery', title='Recovery Over Time',
                  markers=True)
 line_chart.update_yaxes(range=[0, 100])
